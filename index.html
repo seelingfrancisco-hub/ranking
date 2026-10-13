@@ -51,6 +51,10 @@
       background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); color: #e9eefc;
       font-weight: 700;
     }
+    .btn-danger {
+      background: rgba(255,90,122,.18); border: 1px solid rgba(255,90,122,.35); color: #ff5a7a;
+      font-weight: 800;
+    }
     .msg { margin-top: 10px; font-size: 13px; min-height: 18px; opacity: .95; }
     .msg.ok { color: #3ef08a; }
     .msg.err { color: #ff5a7a; }
@@ -88,13 +92,24 @@
         </div>
 
         <button id="saveBtn">✅ Publicar / Guardar</button>
-        <button class="btn-ghost" id="clearBtn" title="Borra TODO el ranking">🧨 Borrar todo</button>
+      </div>
+    </div>
 
-        <div class="msg" id="msg"></div>
+    <div class="card">
+      <div style="font-weight:800;">❌ Borrar una película</div>
+      <div class="form" style="margin-top:10px;">
+        <div>
+          <label for="deleteTitle">Nombre de la película a eliminar</label>
+          <input id="deleteTitle" placeholder="Ej: Interstellar" maxlength="120" />
+        </div>
+
+        <button class="btn-danger" id="deleteSingleBtn">🗑️ Borrar película</button>
       </div>
-      <div class="small" style="margin-top:10px; opacity:.8;">
-        Regla: si el puesto ya está ocupado, los demás con puesto ≥ ese valor se corren +1.
-      </div>
+    </div>
+
+    <div class="card">
+      <button class="btn-ghost" id="clearBtn" style="width:100%;" title="Borra TODO el ranking">🧨 Borrar todo el ranking</button>
+      <div class="msg" id="msg"></div>
     </div>
   </div>
 
@@ -125,6 +140,10 @@
     const titleEl = document.getElementById("title");
     const positionEl = document.getElementById("position");
     const saveBtn = document.getElementById("saveBtn");
+    
+    const deleteTitleEl = document.getElementById("deleteTitle");
+    const deleteSingleBtn = document.getElementById("deleteSingleBtn");
+    
     const refreshBtn = document.getElementById("refreshBtn");
     const clearBtn = document.getElementById("clearBtn");
 
@@ -229,6 +248,28 @@
       } catch (e) {
         console.error(e);
         setMsg("❌ Error al guardar.", "err");
+      }
+    });
+
+    deleteSingleBtn.addEventListener("click", async () => {
+      const targetTitle = (deleteTitleEl.value || "").trim();
+      if (!targetTitle) return setMsg("❌ Escribe el nombre de la película a eliminar.", "err");
+
+      try {
+        setMsg("Buscando y eliminando...", "");
+        const snap = await getDocs(collection(db, "ranking"));
+        const targetDoc = snap.docs.find(d => d.data()?.title?.toLowerCase() === targetTitle.toLowerCase());
+
+        if (!targetDoc) {
+          return setMsg("❌ No se encontró ninguna película con ese nombre.", "err");
+        }
+
+        await deleteDoc(doc(db, "ranking", targetDoc.id));
+        setMsg(`✅ Se eliminó "${targetDoc.data().title}".`, "ok");
+        deleteTitleEl.value = "";
+      } catch (e) {
+        console.error(e);
+        setMsg("❌ Error al eliminar la película.", "err");
       }
     });
 
