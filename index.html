@@ -209,19 +209,32 @@
         if (!title) return setMsg("❌ Escribe un título.", "err");
         if (!Number.isFinite(position) || position < 1) return setMsg("❌ El puesto debe ser un número válido.", "err");
 
-        const pos = Math.floor(position);
-
         await runTransaction(db, async (tx) => {
           const q = query(collection(db, "ranking"), orderBy("position", "asc"));
           const snap = await getDocs(q);
 
-          const docsToShift = [];
+          const totalItems = snap.docs.length;
           let existingDocIdByTitle = null;
 
           for (const d of snap.docs) {
             const data = d.data();
-            if (data?.title?.toLowerCase() === title.toLowerCase()) existingDocIdByTitle = d.id;
-            if (typeof data?.position === "number" && data.position >= pos) {
+            if (data?.title?.toLowerCase() === title.toLowerCase()) {
+              existingDocIdByTitle = d.id;
+              break;
+            }
+          }
+
+          // Evitar huecos: si el puesto puesto es mayor al siguiente disponible, lo ajustamos al final consecutivo
+          let maxAllowedPos = existingDocIdByTitle ? totalItems : totalItems + 1;
+          let pos = Math.floor(position);
+          if (pos > maxAllowedPos) {
+            pos = maxAllowedPos;
+          }
+
+          const docsToShift = [];
+          for (const d of snap.docs) {
+            const data = d.data();
+            if (d.id !== existingDocIdByTitle && typeof data?.position === "number" && data.position >= pos) {
               docsToShift.push({ id: d.id, position: data.position });
             }
           }
@@ -275,11 +288,9 @@
           foundTitle = targetDoc.data().title;
           const removedPos = targetDoc.data().position;
 
-          // Borrar el documento seleccionado
           const targetRef = doc(db, "ranking", targetDoc.id);
           tx.delete(targetRef);
 
-          // Restar 1 (-1) a todas las películas que estaban por debajo en el puesto
           snap.docs.forEach(d => {
             const data = d.data();
             if (d.id !== targetDoc.id && typeof data?.position === "number" && data.position > removedPos) {
