@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ranking de Películas</title>
+  <style>
+    :root { color-scheme: light; }
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      margin: 0; background: #0b0f19; color: #e9eefc;
+    }
+    .wrap { max-width: 520px; margin: 0 auto; padding: 16px; }
+    header {
+      position: sticky; top: 0; background: #0b0f19; padding: 12px 0;
+      border-bottom: 1px solid rgba(255,255,255,.08);
+    }
+    h1 { font-size: 18px; margin: 0 0 6px; }
+    .sub { opacity: .8; font-size: 12px; }
+    .card {
+      background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.08);
+      border-radius: 14px; padding: 14px; margin-top: 12px;
+    }
+    .list { margin-top: 10px; display: grid; gap: 8px; }
+    .row {
+      display: flex; gap: 10px; align-items: center;
+      padding: 10px 12px; border-radius: 12px;
+      background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.07);
+    }
+    .pos {
+      width: 42px; height: 28px; display:flex; align-items:center; justify-content:center;
+      border-radius: 10px; background: rgba(0,150,255,.18);
+      border: 1px solid rgba(0,150,255,.35);
+      font-weight: 700; font-size: 13px;
+    }
+    .title { flex: 1; font-weight: 600; word-break: break-word; }
+    .small { font-size: 12px; opacity: .75; }
+    .form { display: grid; gap: 10px; }
+    label { font-size: 12px; opacity: .85; }
+    input {
+      width: 100%; padding: 12px; border-radius: 12px; border: 1px solid rgba(255,255,255,.12);
+      background: rgba(255,255,255,.06); color: #e9eefc; outline: none;
+    }
+    input::placeholder { color: rgba(233,238,252,.55); }
+    button {
+      padding: 12px; border-radius: 12px; border: 0; cursor: pointer; font-weight: 800;
+      background: linear-gradient(90deg, #00c6ff, #0072ff);
+      color: #06111f;
+    }
+    .btn-ghost {
+      background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); color: #e9eefc;
+      font-weight: 700;
+    }
+    .msg { margin-top: 10px; font-size: 13px; min-height: 18px; opacity: .95; }
+    .msg.ok { color: #3ef08a; }
+    .msg.err { color: #ff5a7a; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>🎬 Ranking de Películas</h1>
+      <div class="sub">Público • Reordenamiento automático • Cambios permanentes</div>
+    </header>
+
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
+        <div>
+          <div style="font-weight:800;">📜 Lista</div>
+          <div class="small" id="countText">Cargando...</div>
+        </div>
+        <button class="btn-ghost" id="refreshBtn">🔄 Refrescar</button>
+      </div>
+      <div class="list" id="list"></div>
+    </div>
+
+    <div class="card">
+      <div style="font-weight:800;">✍️ Insertar / Cambiar puesto</div>
+      <div class="form" style="margin-top:10px;">
+        <div>
+          <label for="title">Título de la película</label>
+          <input id="title" placeholder="Ej: Interstellar" maxlength="120" />
+        </div>
+
+        <div>
+          <label for="position">Puesto (número)</label>
+          <input id="position" type="number" inputmode="numeric" placeholder="Ej: 1" />
+        </div>
+
+        <button id="saveBtn">✅ Publicar / Guardar</button>
+        <button class="btn-ghost" id="clearBtn" title="Borra TODA la colección (ojo)">🧨 Borrar todo</button>
+
+        <div class="msg" id="msg"></div>
+      </div>
+      <div class="small" style="margin-top:10px; opacity:.8;">
+        Regla: si el puesto ya está ocupado, los demás con puesto ≥ ese valor se corren +1.
+      </div>
+    </div>
+  </div>
+
+  <!-- Firebase (compat para evitar líos) -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+    import {
+      getFirestore, collection, query, orderBy, onSnapshot,
+      doc, getDocs, runTransaction, serverTimestamp, deleteDoc
+    } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+
+    // ✅ PON AQUÍ tu firebaseConfig
+    const firebaseConfig = {
+      apiKey: "REEMPLAZAR",
+      authDomain: "REEMPLAZAR",
+      projectId: "REEMPLAZAR",
+      storageBucket: "REEMPLAZAR",
+      messagingSenderId: "REEMPLAZAR",
+      appId: "REEMPLAZAR"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    const listEl = document.getElementById("list");
+    const countText = document.getElementById("countText");
+    const msgEl = document.getElementById("msg");
+
+    const titleEl = document.getElementById("title");
+    const positionEl = document.getElementById("position");
+    const saveBtn = document.getElementById("saveBtn");
+    const refreshBtn = document.getElementById("refreshBtn");
+    const clearBtn = document.getElementById("clearBtn");
+
+    let unsubscribe = null;
+
+    function setMsg(text, type) {
+      msgEl.textContent = text || "";
+      msgEl.className = "msg" + (type ? " " + type : "");
+    }
+
+    function escapeHtml(str) {
+      return (str ?? "").toString()
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function render(items) {
+      listEl.innerHTML = "";
+      if (!items.length) {
+        listEl.innerHTML = `<div class="small">Aún no hay películas. ¡Publica la primera! 🍿</div>`;
+        return;
+      }
+      for (const it of items) {
+        const row = document.createElement("div");
+        row.className = "row";
+        row.innerHTML = `
+          <div class="pos">#${it.position}</div>
+          <div class="title">${escapeHtml(it.title)}</div>
+        `;
+        listEl.appendChild(row);
+      }
+    }
+
+    async function subscribeRanking() {
+      const q = query(collection(db, "ranking"), orderBy("position", "asc"));
+      if (unsubscribe) unsubscribe();
+
+      unsubscribe = onSnapshot(q, (snap) => {
+        const items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        countText.textContent = `Total: ${items.length}`;
+        // Sanitizamos por si hubiera datos raros
+        render(items.sort((a,b)=>a.position-b.position));
+      });
+    }
+
+    refreshBtn.addEventListener("click", () => {
+      setMsg("Actualizando…", "");
+      subscribeRanking().then(() => setMsg("✅ Actualizado", "ok"));
+    });
+
+    saveBtn.addEventListener("click", async () => {
+      try {
+        setMsg("", "");
+        const title = (titleEl.value || "").trim();
+        const position = Number(positionEl.value);
+
+        if (!title) return setMsg("❌ Escribe un título.", "err");
+        if (!Number.isFinite(position)) return setMsg("❌ El puesto debe ser un número.", "err");
+
+        // Opcional: evitar decimales
+        const pos = Math.floor(position);
+
+        await runTransaction(db, async (tx) => {
+          // 1) Conseguir todos los docs con position >= pos
+          const q = query(collection(db, "ranking"), orderBy("position", "asc"));
+          const snap = await getDocs(q);
+
+          const docsToShift = [];
+          let existingDocIdByTitle = null;
+
+          for (const d of snap.docs) {
+            const data = d.data();
+            if (data?.title === title) existingDocIdByTitle = d.id;
+            if (typeof data?.position === "number" && data.position >= pos) {
+              docsToShift.push({ id: d.id, position: data.position });
+            }
+          }
+
+          // 2) Si el título ya existe, lo trata como "cambiar puesto"
+          //    - Para reordenar correcto, primero lo saca del camino (si está >= pos)
+          if (existingDocIdByTitle) {
+            const existingDoc = snap.docs.find(d => d.id === existingDocIdByTitle);
+            const existingPosition = existingDoc?.data()?.position;
+
+            // Si la película ya está en el ranking con position >= pos, también participa en el corrimiento
+            // (así mantenemos la regla de corrimiento de todo lo >= pos)
+          }
+
+          // 3) Corrimiento +1 de todos con position >= pos
+          // Ordenar desc asegura que no pisemos valores en la lógica
+          docsToShift
+            .sort((a,b)=>b.position-a.position)
+            .forEach(({id, position}) => {
+              const ref = doc(db, "ranking", id);
+              tx.update(ref, { position: position + 1, updatedAt: serverTimestamp() });
+            });
+
+          // 4) Insertar / actualizar el doc con el título
+          //    Buscamos si ya existe por título exacto
+          if (existingDocIdByTitle) {
+            const ref = doc(db, "ranking", existingDocIdByTitle);
+            tx.update(ref, { position: pos, updatedAt: serverTimestamp(), title });
+          } else {
+            const newRef = doc(collection(db, "ranking"));
+            tx.set(newRef, { title, position: pos, updatedAt: serverTimestamp() });
+          }
+        });
+
+        setMsg("✅ Guardado y reordenado.", "ok");
+        titleEl.value = "";
+        // no limpiamos position para que sea rápido
+      } catch (e) {
+        console.error(e);
+        setMsg("❌ Error al guardar. Revisa la consola.", "err");
+      }
+    });
+
+    clearBtn.addEventListener("click", async () => {
+      const ok = confirm("¿Seguro que quieres borrar TODA la colección 'ranking'? Esta acción no se puede deshacer.");
+      if (!ok) return;
+
+      try {
+        setMsg("🧨 Borrando…", "");
+        const snap = await getDocs(collection(db, "ranking"));
+        await Promise.all(snap.docs.map(d => deleteDoc(d.ref)));
+        setMsg("✅ Borrado completo.", "ok");
+      } catch (e) {
+        console.error(e);
+        setMsg("❌ No se pudo borrar.", "err");
+      }
+    });
+
+    // Inicio
+    subscribeRanking();
+  </script>
+</body>
+</html>
