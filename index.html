@@ -60,7 +60,7 @@
   <div class="wrap">
     <header>
       <h1>🎬 Ranking de Películas</h1>
-      <div class="sub">Público • Reordenamiento automático • Cambios permanentes</div>
+      <div class="sub">Nube • Sincronizado en tiempo real • Celular y PC</div>
     </header>
 
     <div class="card">
@@ -88,7 +88,7 @@
         </div>
 
         <button id="saveBtn">✅ Publicar / Guardar</button>
-        <button class="btn-ghost" id="clearBtn" title="Borra TODA la colección (ojo)">🧨 Borrar todo</button>
+        <button class="btn-ghost" id="clearBtn" title="Borra TODO el ranking">🧨 Borrar todo</button>
 
         <div class="msg" id="msg"></div>
       </div>
@@ -98,7 +98,6 @@
     </div>
   </div>
 
-  <!-- Firebase (compat para evitar líos) -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
     import {
@@ -106,14 +105,14 @@
       doc, getDocs, runTransaction, serverTimestamp, deleteDoc
     } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
-    // ✅ PON AQUÍ tu firebaseConfig
     const firebaseConfig = {
-      apiKey: "REEMPLAZAR",
-      authDomain: "REEMPLAZAR",
-      projectId: "REEMPLAZAR",
-      storageBucket: "REEMPLAZAR",
-      messagingSenderId: "REEMPLAZAR",
-      appId: "REEMPLAZAR"
+      apiKey: "AIzaSyDwAGFZ1dgR8Y7qmVAxz6E8ouni16r9aH4",
+      authDomain: "ranking-36853.firebaseapp.com",
+      projectId: "ranking-36853",
+      storageBucket: "ranking-36853.firebasestorage.app",
+      messagingSenderId: "879175318655",
+      appId: "1:879175318655:web:86d5fdc1381e3995ec134a",
+      measurementId: "G-7S8G70BV86"
     };
 
     const app = initializeApp(firebaseConfig);
@@ -169,14 +168,17 @@
       unsubscribe = onSnapshot(q, (snap) => {
         const items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
         countText.textContent = `Total: ${items.length}`;
-        // Sanitizamos por si hubiera datos raros
         render(items.sort((a,b)=>a.position-b.position));
+      }, (error) => {
+        console.error(error);
+        setMsg("❌ Error al conectar con Firebase.", "err");
       });
     }
 
     refreshBtn.addEventListener("click", () => {
       setMsg("Actualizando…", "");
-      subscribeRanking().then(() => setMsg("✅ Actualizado", "ok"));
+      subscribeRanking();
+      setMsg("✅ Actualizado", "ok");
     });
 
     saveBtn.addEventListener("click", async () => {
@@ -186,13 +188,11 @@
         const position = Number(positionEl.value);
 
         if (!title) return setMsg("❌ Escribe un título.", "err");
-        if (!Number.isFinite(position)) return setMsg("❌ El puesto debe ser un número.", "err");
+        if (!Number.isFinite(position) || position < 1) return setMsg("❌ El puesto debe ser un número válido.", "err");
 
-        // Opcional: evitar decimales
         const pos = Math.floor(position);
 
         await runTransaction(db, async (tx) => {
-          // 1) Conseguir todos los docs con position >= pos
           const q = query(collection(db, "ranking"), orderBy("position", "asc"));
           const snap = await getDocs(q);
 
@@ -201,24 +201,12 @@
 
           for (const d of snap.docs) {
             const data = d.data();
-            if (data?.title === title) existingDocIdByTitle = d.id;
+            if (data?.title?.toLowerCase() === title.toLowerCase()) existingDocIdByTitle = d.id;
             if (typeof data?.position === "number" && data.position >= pos) {
               docsToShift.push({ id: d.id, position: data.position });
             }
           }
 
-          // 2) Si el título ya existe, lo trata como "cambiar puesto"
-          //    - Para reordenar correcto, primero lo saca del camino (si está >= pos)
-          if (existingDocIdByTitle) {
-            const existingDoc = snap.docs.find(d => d.id === existingDocIdByTitle);
-            const existingPosition = existingDoc?.data()?.position;
-
-            // Si la película ya está en el ranking con position >= pos, también participa en el corrimiento
-            // (así mantenemos la regla de corrimiento de todo lo >= pos)
-          }
-
-          // 3) Corrimiento +1 de todos con position >= pos
-          // Ordenar desc asegura que no pisemos valores en la lógica
           docsToShift
             .sort((a,b)=>b.position-a.position)
             .forEach(({id, position}) => {
@@ -226,8 +214,6 @@
               tx.update(ref, { position: position + 1, updatedAt: serverTimestamp() });
             });
 
-          // 4) Insertar / actualizar el doc con el título
-          //    Buscamos si ya existe por título exacto
           if (existingDocIdByTitle) {
             const ref = doc(db, "ranking", existingDocIdByTitle);
             tx.update(ref, { position: pos, updatedAt: serverTimestamp(), title });
@@ -237,17 +223,17 @@
           }
         });
 
-        setMsg("✅ Guardado y reordenado.", "ok");
+        setMsg("✅ Guardado en la nube.", "ok");
         titleEl.value = "";
-        // no limpiamos position para que sea rápido
+        positionEl.value = "";
       } catch (e) {
         console.error(e);
-        setMsg("❌ Error al guardar. Revisa la consola.", "err");
+        setMsg("❌ Error al guardar.", "err");
       }
     });
 
     clearBtn.addEventListener("click", async () => {
-      const ok = confirm("¿Seguro que quieres borrar TODA la colección 'ranking'? Esta acción no se puede deshacer.");
+      const ok = confirm("¿Seguro que quieres borrar todo el ranking de la nube?");
       if (!ok) return;
 
       try {
@@ -261,7 +247,6 @@
       }
     });
 
-    // Inicio
     subscribeRanking();
   </script>
 </body>
