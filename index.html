@@ -256,16 +256,44 @@
       if (!targetTitle) return setMsg("❌ Escribe el nombre de la película a eliminar.", "err");
 
       try {
-        setMsg("Buscando y eliminando...", "");
-        const snap = await getDocs(collection(db, "ranking"));
-        const targetDoc = snap.docs.find(d => d.data()?.title?.toLowerCase() === targetTitle.toLowerCase());
+        setMsg("Buscando y reordenando...", "");
 
-        if (!targetDoc) {
+        let foundTitle = "";
+        let notFound = false;
+
+        await runTransaction(db, async (tx) => {
+          const q = query(collection(db, "ranking"), orderBy("position", "asc"));
+          const snap = await getDocs(q);
+
+          const targetDoc = snap.docs.find(d => d.data()?.title?.toLowerCase() === targetTitle.toLowerCase());
+
+          if (!targetDoc) {
+            notFound = true;
+            return;
+          }
+
+          foundTitle = targetDoc.data().title;
+          const removedPos = targetDoc.data().position;
+
+          // Borrar el documento seleccionado
+          const targetRef = doc(db, "ranking", targetDoc.id);
+          tx.delete(targetRef);
+
+          // Restar 1 (-1) a todas las películas que estaban por debajo en el puesto
+          snap.docs.forEach(d => {
+            const data = d.data();
+            if (d.id !== targetDoc.id && typeof data?.position === "number" && data.position > removedPos) {
+              const ref = doc(db, "ranking", d.id);
+              tx.update(ref, { position: data.position - 1, updatedAt: serverTimestamp() });
+            }
+          });
+        });
+
+        if (notFound) {
           return setMsg("❌ No se encontró ninguna película con ese nombre.", "err");
         }
 
-        await deleteDoc(doc(db, "ranking", targetDoc.id));
-        setMsg(`✅ Se eliminó "${targetDoc.data().title}".`, "ok");
+        setMsg(`✅ Se eliminó "${foundTitle}" y se reordenó el ranking.`, "ok");
         deleteTitleEl.value = "";
       } catch (e) {
         console.error(e);
