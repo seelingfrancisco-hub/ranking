@@ -14,6 +14,7 @@
     header {
       position: sticky; top: 0; background: #0b0f19; padding: 12px 0;
       border-bottom: 1px solid rgba(255,255,255,.08);
+      z-index: 10;
     }
     h1 { font-size: 18px; margin: 0 0 6px; }
     .sub { opacity: .8; font-size: 12px; }
@@ -40,6 +41,7 @@
     input {
       width: 100%; padding: 12px; border-radius: 12px; border: 1px solid rgba(255,255,255,.12);
       background: rgba(255,255,255,.06); color: #e9eefc; outline: none;
+      box-sizing: border-box;
     }
     input::placeholder { color: rgba(233,238,252,.55); }
     button {
@@ -67,10 +69,11 @@
       <div class="sub">Nube • Sincronizado en tiempo real • Celular y PC</div>
     </header>
 
+    <!-- Lista Oficial del Ranking (Pública) -->
     <div class="card">
       <div style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
         <div>
-          <div style="font-weight:800;">📜 Lista</div>
+          <div style="font-weight:800;">📜 Lista Oficial</div>
           <div class="small" id="countText">Cargando...</div>
         </div>
         <button class="btn-ghost" id="refreshBtn">🔄 Refrescar</button>
@@ -78,37 +81,73 @@
       <div class="list" id="list"></div>
     </div>
 
+    <!-- Sección Pública para Recomendar Películas -->
     <div class="card">
-      <div style="font-weight:800;">✍️ Insertar / Cambiar puesto</div>
+      <div style="font-weight:800;">💡 Recomendar una Película</div>
       <div class="form" style="margin-top:10px;">
+        <div>
+          <label for="suggestTitle">¿Qué película sugieres?</label>
+          <input id="suggestTitle" placeholder="Ej: Inception" maxlength="120" />
+        </div>
+        <button id="suggestBtn">✨ Enviar recomendación</button>
+      </div>
+    </div>
+
+    <!-- Pantalla de Login con Contraseña -->
+    <div class="card" id="loginCard">
+      <div style="font-weight:800;">🔒 Panel de Administración</div>
+      <div class="form" style="margin-top:10px;">
+        <div>
+          <label for="passwordInput">Introduce la contraseña para modificar el ranking</label>
+          <input id="passwordInput" type="password" placeholder="Contraseña..." />
+        </div>
+        <button id="loginBtn">🔓 Entrar</button>
+      </div>
+    </div>
+
+    <!-- Panel de Administración (Protegido por Contraseña) -->
+    <div class="card" id="adminCard" style="display: none;">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <div style="font-weight:800; color: #3ef08a;">✅ Panel Desbloqueado</div>
+        <button class="btn-ghost" id="lockBtn" style="padding: 6px 10px; font-size: 11px;">🔒 Bloquear</button>
+      </div>
+
+      <div style="margin-top: 16px; font-weight:800;">✍️ Insertar / Cambiar puesto</div>
+      <div class="form" style="margin-top:8px;">
         <div>
           <label for="title">Título de la película</label>
           <input id="title" placeholder="Ej: Interstellar" maxlength="120" />
         </div>
-
         <div>
           <label for="position">Puesto (número)</label>
           <input id="position" type="number" inputmode="numeric" placeholder="Ej: 1" />
         </div>
-
         <button id="saveBtn">✅ Publicar / Guardar</button>
       </div>
-    </div>
 
-    <div class="card">
-      <div style="font-weight:800;">❌ Borrar una película</div>
-      <div class="form" style="margin-top:10px;">
+      <div style="margin-top: 20px; font-weight:800;">❌ Borrar una película del ranking</div>
+      <div class="form" style="margin-top:8px;">
         <div>
           <label for="deleteTitle">Nombre de la película a eliminar</label>
           <input id="deleteTitle" placeholder="Ej: Interstellar" maxlength="120" />
         </div>
-
         <button class="btn-danger" id="deleteSingleBtn">🗑️ Borrar película</button>
+      </div>
+
+      <div style="margin-top: 20px;">
+        <button class="btn-ghost" id="clearBtn" style="width:100%;" title="Borra TODO el ranking">🧨 Borrar todo el ranking</button>
+      </div>
+
+      <!-- Gestión de Películas Sugeridas (Protegido) -->
+      <div style="margin-top: 24px; border-top: 1px solid rgba(255,255,255,.08); padding-top: 16px;">
+        <div style="font-weight:800;">📋 Películas Sugeridas por Usuarios</div>
+        <div class="small" style="margin-top:4px; opacity:.75;">Sugerencias enviadas por visitantes:</div>
+        <div class="list" id="suggestList" style="margin-top: 10px;"></div>
       </div>
     </div>
 
+    <!-- Mensajes de Estado Globales -->
     <div class="card">
-      <button class="btn-ghost" id="clearBtn" style="width:100%;" title="Borra TODO el ranking">🧨 Borrar todo el ranking</button>
       <div class="msg" id="msg"></div>
     </div>
   </div>
@@ -117,7 +156,7 @@
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
     import {
       getFirestore, collection, query, orderBy, onSnapshot,
-      doc, getDocs, writeBatch, serverTimestamp, deleteDoc
+      doc, getDocs, writeBatch, serverTimestamp, deleteDoc, addDoc
     } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
     const firebaseConfig = {
@@ -137,6 +176,12 @@
     const countText = document.getElementById("countText");
     const msgEl = document.getElementById("msg");
 
+    const loginCard = document.getElementById("loginCard");
+    const adminCard = document.getElementById("adminCard");
+    const passwordInput = document.getElementById("passwordInput");
+    const loginBtn = document.getElementById("loginBtn");
+    const lockBtn = document.getElementById("lockBtn");
+
     const titleEl = document.getElementById("title");
     const positionEl = document.getElementById("position");
     const saveBtn = document.getElementById("saveBtn");
@@ -147,7 +192,12 @@
     const refreshBtn = document.getElementById("refreshBtn");
     const clearBtn = document.getElementById("clearBtn");
 
-    let unsubscribe = null;
+    const suggestTitleEl = document.getElementById("suggestTitle");
+    const suggestBtn = document.getElementById("suggestBtn");
+    const suggestListEl = document.getElementById("suggestList");
+
+    let unsubscribeRanking = null;
+    let unsubscribeSuggestions = null;
 
     function setMsg(text, type) {
       msgEl.textContent = text || "";
@@ -163,10 +213,35 @@
         .replaceAll("'", "&#039;");
     }
 
-    function render(items) {
+    // Control de Contraseña
+    loginBtn.addEventListener("click", () => {
+      if (passwordInput.value.trim() === "executeorder66") {
+        loginCard.style.display = "none";
+        adminCard.style.display = "block";
+        passwordInput.value = "";
+        setMsg("✅ Panel de administración desbloqueado.", "ok");
+        subscribeSuggestions();
+      } else {
+        setMsg("❌ Contraseña incorrecta.", "err");
+        passwordInput.value = "";
+      }
+    });
+
+    passwordInput.addEventListener("keypress", (e) => {
+      if (e.key === "Enter") loginBtn.click();
+    });
+
+    lockBtn.addEventListener("click", () => {
+      adminCard.style.display = "none";
+      loginCard.style.display = "block";
+      if (unsubscribeSuggestions) unsubscribeSuggestions();
+      setMsg("🔒 Panel bloqueado.", "ok");
+    });
+
+    function renderRanking(items) {
       listEl.innerHTML = "";
       if (!items.length) {
-        listEl.innerHTML = `<div class="small">Aún no hay películas. ¡Publica la primera! 🍿</div>`;
+        listEl.innerHTML = `<div class="small">Aún no hay películas en el ranking. 🍿</div>`;
         return;
       }
       for (const it of items) {
@@ -180,17 +255,61 @@
       }
     }
 
+    function renderSuggestions(items) {
+      suggestListEl.innerHTML = "";
+      if (!items.length) {
+        suggestListEl.innerHTML = `<div class="small">No hay recomendaciones todavía. 🎬</div>`;
+        return;
+      }
+      for (const it of items) {
+        const row = document.createElement("div");
+        row.className = "row";
+        row.innerHTML = `
+          <div class="title">${escapeHtml(it.title)}</div>
+          <button class="btn-delete-sug" data-id="${it.id}" style="background: rgba(255,90,122,.15); border: 1px solid rgba(255,90,122,.3); color: #ff5a7a; border-radius: 8px; padding: 6px 10px; cursor: pointer; font-size: 11px; font-weight: 700;">Borrar</button>
+        `;
+        suggestListEl.appendChild(row);
+      }
+
+      document.querySelectorAll(".btn-delete-sug").forEach(btn => {
+        btn.addEventListener("click", async (e) => {
+          const id = e.currentTarget.getAttribute("data-id");
+          try {
+            await deleteDoc(doc(db, "suggestions", id));
+            setMsg("✅ Recomendación eliminada.", "ok");
+          } catch (err) {
+            console.error(err);
+            setMsg("❌ Error al eliminar recomendación.", "err");
+          }
+        });
+      });
+    }
+
     async function subscribeRanking() {
       const q = query(collection(db, "ranking"), orderBy("position", "asc"));
-      if (unsubscribe) unsubscribe();
+      if (unsubscribeRanking) unsubscribeRanking();
 
-      unsubscribe = onSnapshot(q, (snap) => {
+      unsubscribeRanking = onSnapshot(q, (snap) => {
         const items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
         countText.textContent = `Total: ${items.length}`;
-        render(items.sort((a,b)=>a.position-b.position));
+        renderRanking(items.sort((a,b)=>a.position-b.position));
       }, (error) => {
         console.error(error);
         setMsg("❌ Error al conectar con Firebase.", "err");
+      });
+    }
+
+    function subscribeSuggestions() {
+      const q = collection(db, "suggestions");
+      if (unsubscribeSuggestions) unsubscribeSuggestions();
+
+      unsubscribeSuggestions = onSnapshot(q, (snap) => {
+        const items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        // Ordenar localmente por fecha para evitar exigir índice compuesto en Firebase
+        items.sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
+        renderSuggestions(items);
+      }, (error) => {
+        console.error(error);
       });
     }
 
@@ -303,6 +422,25 @@
       }
     });
 
+    suggestBtn.addEventListener("click", async () => {
+      try {
+        const title = (suggestTitleEl.value || "").trim();
+        if (!title) return setMsg("❌ Escribe el nombre de la película a recomendar.", "err");
+
+        await addDoc(collection(db, "suggestions"), {
+          title,
+          createdAt: serverTimestamp()
+        });
+
+        setMsg("✨ ¡Recomendación enviada con éxito!", "ok");
+        suggestTitleEl.value = "";
+      } catch (e) {
+        console.error(e);
+        setMsg("❌ Error al enviar la recomendación.", "err");
+      }
+    });
+
+    // Iniciar carga del ranking público
     subscribeRanking();
   </script>
 </body>
