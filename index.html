@@ -117,7 +117,7 @@
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
     import {
       getFirestore, collection, query, orderBy, onSnapshot,
-      doc, getDocs, runTransaction, serverTimestamp, deleteDoc
+      doc, getDocs, writeBatch, serverTimestamp, deleteDoc
     } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
     const firebaseConfig = {
@@ -209,51 +209,38 @@
         if (!title) return setMsg("❌ Escribe un título.", "err");
         if (!Number.isFinite(position) || position < 1) return setMsg("❌ El puesto debe ser un número válido.", "err");
 
-        await runTransaction(db, async (tx) => {
-          const q = query(collection(db, "ranking"), orderBy("position", "asc"));
-          const snap = await getDocs(q);
+        const snap = await getDocs(query(collection(db, "ranking"), orderBy("position", "asc")));
+        let items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
-          const totalItems = snap.docs.length;
-          let existingDocIdByTitle = null;
+        const existingIndex = items.findIndex(item => item.title.toLowerCase() === title.toLowerCase());
+        
+        let itemToSave;
+        if (existingIndex !== -1) {
+          itemToSave = items.splice(existingIndex, 1)[0];
+          itemToSave.title = title;
+        } else {
+          itemToSave = { title, id: null };
+        }
 
-          for (const d of snap.docs) {
-            const data = d.data();
-            if (data?.title?.toLowerCase() === title.toLowerCase()) {
-              existingDocIdByTitle = d.id;
-              break;
-            }
-          }
+        let targetIndex = Math.floor(position) - 1;
+        if (targetIndex < 0) targetIndex = 0;
+        if (targetIndex > items.length) targetIndex = items.length;
 
-          // Evitar huecos: si el puesto puesto es mayor al siguiente disponible, lo ajustamos al final consecutivo
-          let maxAllowedPos = existingDocIdByTitle ? totalItems : totalItems + 1;
-          let pos = Math.floor(position);
-          if (pos > maxAllowedPos) {
-            pos = maxAllowedPos;
-          }
+        items.splice(targetIndex, 0, itemToSave);
 
-          const docsToShift = [];
-          for (const d of snap.docs) {
-            const data = d.data();
-            if (d.id !== existingDocIdByTitle && typeof data?.position === "number" && data.position >= pos) {
-              docsToShift.push({ id: d.id, position: data.position });
-            }
-          }
-
-          docsToShift
-            .sort((a,b)=>b.position-a.position)
-            .forEach(({id, position}) => {
-              const ref = doc(db, "ranking", id);
-              tx.update(ref, { position: position + 1, updatedAt: serverTimestamp() });
-            });
-
-          if (existingDocIdByTitle) {
-            const ref = doc(db, "ranking", existingDocIdByTitle);
-            tx.update(ref, { position: pos, updatedAt: serverTimestamp(), title });
+        const batch = writeBatch(db);
+        items.forEach((item, idx) => {
+          const newPos = idx + 1;
+          if (item.id) {
+            const ref = doc(db, "ranking", item.id);
+            batch.update(ref, { title: item.title, position: newPos, updatedAt: serverTimestamp() });
           } else {
             const newRef = doc(collection(db, "ranking"));
-            tx.set(newRef, { title, position: pos, updatedAt: serverTimestamp() });
+            batch.set(newRef, { title: item.title, position: newPos, updatedAt: serverTimestamp() });
           }
         });
+
+        await batch.commit();
 
         setMsg("✅ Guardado en la nube.", "ok");
         titleEl.value = "";
@@ -271,40 +258,29 @@
       try {
         setMsg("Buscando y reordenando...", "");
 
-        let foundTitle = "";
-        let notFound = false;
+        const snap = await getDocs(query(collection(db, "ranking"), orderBy("position", "asc")));
+        let items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
-        await runTransaction(db, async (tx) => {
-          const q = query(collection(db, "ranking"), orderBy("position", "asc"));
-          const snap = await getDocs(q);
-
-          const targetDoc = snap.docs.find(d => d.data()?.title?.toLowerCase() === targetTitle.toLowerCase());
-
-          if (!targetDoc) {
-            notFound = true;
-            return;
-          }
-
-          foundTitle = targetDoc.data().title;
-          const removedPos = targetDoc.data().position;
-
-          const targetRef = doc(db, "ranking", targetDoc.id);
-          tx.delete(targetRef);
-
-          snap.docs.forEach(d => {
-            const data = d.data();
-            if (d.id !== targetDoc.id && typeof data?.position === "number" && data.position > removedPos) {
-              const ref = doc(db, "ranking", d.id);
-              tx.update(ref, { position: data.position - 1, updatedAt: serverTimestamp() });
-            }
-          });
-        });
-
-        if (notFound) {
+        const targetIndex = items.findIndex(item => item.title.toLowerCase() === targetTitle.toLowerCase());
+        if (targetIndex === -1) {
           return setMsg("❌ No se encontró ninguna película con ese nombre.", "err");
         }
 
-        setMsg(`✅ Se eliminó "${foundTitle}" y se reordenó el ranking.`, "ok");
+        const removed = items.splice(targetIndex, 1)[0];
+
+        const batch = writeBatch(db);
+        const targetRef = doc(db, "ranking", removed.id);
+        batch.delete(targetRef);
+
+        items.forEach((item, idx) => {
+          const newPos = idx + 1;
+          const ref = doc(db, "ranking", item.id);
+          batch.update(ref, { position: newPos, updatedAt: serverTimestamp() });
+        });
+
+        await batch.commit();
+
+        setMsg(`✅ Se eliminó "${removed.title}" y se reordenó el ranking.`, "ok");
         deleteTitleEl.value = "";
       } catch (e) {
         console.error(e);
